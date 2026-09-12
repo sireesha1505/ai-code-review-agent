@@ -1,0 +1,16 @@
+.vscode/
+.env
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+*.log
+
+# Generated review outputs
+backend/reviews/
+
+# OS
+.DS_Store
+Thumbs.db
