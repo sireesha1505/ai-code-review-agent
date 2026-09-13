@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta, timezone
+
 from database.models import CodeReview
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,7 @@ def save_code_review(
 
     return code_review
 
+
 def get_code_reviews(
     db: Session,
     repository: str,
@@ -38,6 +41,7 @@ def get_code_reviews(
         .all()
     )
 
+
 def get_code_review_by_id(
     db: Session,
     review_id: int
@@ -47,6 +51,7 @@ def get_code_review_by_id(
         .filter(CodeReview.id == review_id)
         .first()
     )
+
 
 def get_code_review_by_commit(
     db: Session,
@@ -65,7 +70,7 @@ def get_code_review_by_commit(
         .first()
     )
 
-    
+
 def update_review_result(
     db: Session,
     review_id: int,
@@ -83,11 +88,13 @@ def update_review_result(
 
     code_review.review = review
     code_review.status = status
+    code_review.error_message = None
 
     db.commit()
     db.refresh(code_review)
 
     return code_review
+
 
 def update_review_status(
     db: Session,
@@ -110,6 +117,7 @@ def update_review_status(
 
     return code_review
 
+
 def update_retry_count(
     db: Session,
     review_id: int,
@@ -130,6 +138,7 @@ def update_retry_count(
     db.refresh(code_review)
 
     return code_review
+
 
 def update_review_failure(
     db: Session,
@@ -153,6 +162,7 @@ def update_review_failure(
 
     return code_review
 
+
 def update_review_duration(
     db: Session,
     review_id: int,
@@ -168,6 +178,98 @@ def update_review_duration(
         return None
 
     code_review.duration_ms = duration_ms
+
+    db.commit()
+    db.refresh(code_review)
+
+    return code_review
+
+
+def reset_failed_review(
+    db: Session,
+    review_id: int
+):
+    code_review = (
+        db.query(CodeReview)
+        .filter(CodeReview.id == review_id)
+        .first()
+    )
+
+    if not code_review:
+        return None
+
+    code_review.status = "queued"
+    code_review.review = None
+    code_review.retry_count = 0
+    code_review.error_message = None
+    code_review.duration_ms = None
+
+    db.commit()
+    db.refresh(code_review)
+
+    return code_review
+
+
+def get_stale_processing_reviews(
+    db: Session,
+    stale_minutes: int = 10
+):
+    cutoff_time = datetime.now(timezone.utc) - timedelta(
+        minutes=stale_minutes
+    )
+
+    return (
+        db.query(CodeReview)
+        .filter(
+            CodeReview.status == "processing",
+            CodeReview.updated_at < cutoff_time,
+        )
+        .all()
+    )
+
+
+def reset_stale_review(
+    db: Session,
+    review_id: int
+):
+    code_review = (
+        db.query(CodeReview)
+        .filter(CodeReview.id == review_id)
+        .first()
+    )
+
+    if not code_review:
+        return None
+
+    if code_review.status != "processing":
+        return None
+
+    code_review.status = "queued"
+    code_review.retry_count += 1
+
+    db.commit()
+    db.refresh(code_review)
+
+    return code_review
+
+
+def refresh_review_heartbeat(
+    db: Session,
+    review_id: int
+):
+    code_review = (
+        db.query(CodeReview)
+        .filter(CodeReview.id == review_id)
+        .first()
+    )
+
+    if not code_review:
+        return None
+
+    if code_review.status != "processing":
+        return None
+
+    code_review.updated_at = datetime.now(timezone.utc)
 
     db.commit()
     db.refresh(code_review)

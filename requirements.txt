@@ -17,3 +17,4 @@ langgraph==1.2.11
 
 sentence-transformers
 faiss-cpu
+alembic

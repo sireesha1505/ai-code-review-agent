@@ -20,7 +20,8 @@ from infrastructure.queue import enqueue_review_job
 from database.connection import SessionLocal
 from database.review_storage_service import (
     save_code_review,
-    get_code_review_by_commit
+    get_code_review_by_commit,
+    reset_failed_review,
 )
 
 from common.logger import logger
@@ -55,10 +56,6 @@ async def accessWebhook(request: Request):
     secret = os.environ.get("GITHUB_WEBHOOK_SECRET")
     event = request.headers.get("X-GitHub-Event")
 
-    # --------------------------------------------------
-    # Verify GitHub webhook signature
-    # --------------------------------------------------
-
     if secret:
         if not signature:
             raise HTTPException(
@@ -85,10 +82,6 @@ async def accessWebhook(request: Request):
                 detail="Invalid GitHub signature"
             )
 
-    # --------------------------------------------------
-    # Parse webhook
-    # --------------------------------------------------
-
     parsed_request_body = parse_request_body(body)
 
     extracted_event = parse_request_event(event)
@@ -96,7 +89,6 @@ async def accessWebhook(request: Request):
         parsed_request_body
     )
 
-    # Ignore unrelated GitHub events
     if (
         extracted_event != "pull_request"
         or extracted_action not in ACTIONS
@@ -104,10 +96,6 @@ async def accessWebhook(request: Request):
         return {
             "message": "Event ignored"
         }
-
-    # --------------------------------------------------
-    # Extract PR metadata
-    # --------------------------------------------------
 
     metadata = extract_pr_metadata(
         parsed_request_body
@@ -137,14 +125,9 @@ async def accessWebhook(request: Request):
 
     pull_number = int(pull_number)
 
-    # --------------------------------------------------
-    # Idempotency check + DB record
-    # --------------------------------------------------
-
     db = SessionLocal()
 
     try:
-
         existing_review = get_code_review_by_commit(
             db=db,
             repository=repo_name,
@@ -154,40 +137,78 @@ async def accessWebhook(request: Request):
 
         if existing_review:
 
-            logger.info(
-                "Duplicate review ignored | review_id=%s | repo=%s | pr=%s | commit=%s",
-                existing_review.id,
-                repo_name,
-                pull_number,
-                commit_sha
+            if existing_review.status == "completed":
+                logger.info(
+                    "Completed review already exists | "
+                    "review_id=%s | repo=%s | pr=%s | commit=%s",
+                    existing_review.id,
+                    repo_name,
+                    pull_number,
+                    commit_sha
+                )
+
+                return {
+                    "message": "Review already completed",
+                    "review_id": existing_review.id,
+                    "status": existing_review.status
+                }
+
+            if existing_review.status in {
+                "queued",
+                "processing"
+            }:
+                logger.info(
+                    "Review already in progress | "
+                    "review_id=%s | status=%s | repo=%s | pr=%s | commit=%s",
+                    existing_review.id,
+                    existing_review.status,
+                    repo_name,
+                    pull_number,
+                    commit_sha
+                )
+
+                return {
+                    "message": "Review already in progress",
+                    "review_id": existing_review.id,
+                    "status": existing_review.status
+                }
+
+            if existing_review.status == "failed":
+                review = reset_failed_review(
+                    db=db,
+                    review_id=existing_review.id
+                )
+
+                review_id = review.id
+
+                logger.info(
+                    "Retrying failed review | "
+                    "review_id=%s | repo=%s | pr=%s | commit=%s",
+                    review_id,
+                    repo_name,
+                    pull_number,
+                    commit_sha
+                )
+
+            else:
+                review = existing_review
+                review_id = review.id
+
+        else:
+            review = save_code_review(
+                db=db,
+                repository=repo_name,
+                pr_number=pull_number,
+                commit_sha=commit_sha,
+                review=None
             )
 
-            return {
-                "message": "Review already exists",
-                "review_id": existing_review.id,
-                "status": existing_review.status
-            }
-
-        # Create review record
-        review = save_code_review(
-            db=db,
-            repository=repo_name,
-            pr_number=pull_number,
-            commit_sha=commit_sha,
-            review=None
-        )
-
-        review_id = review.id
+            review_id = review.id
 
     finally:
         db.close()
 
-    # --------------------------------------------------
-    # Tell user that AI review has started
-    # --------------------------------------------------
-
     try:
-
         await create_or_update_review_status(
             repo_name=repo_name,
             pull_number=pull_number,
@@ -196,10 +217,6 @@ async def accessWebhook(request: Request):
         )
 
     except Exception as e:
-
-        # Do NOT fail the webhook because a GitHub
-        # status comment failed.
-
         logger.warning(
             "Failed to post review status | "
             "review_id=%s | repo=%s | pr=%s | error=%s",
@@ -208,10 +225,6 @@ async def accessWebhook(request: Request):
             pull_number,
             str(e)
         )
-
-    # --------------------------------------------------
-    # Queue review
-    # --------------------------------------------------
 
     job = {
         "review_id": review_id,
