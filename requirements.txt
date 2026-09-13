@@ -1,19 +1,27 @@
 fastapi==0.141.1
+
 uvicorn
+
 httpx==0.28.1
 
 redis==8.1.0
+
 psycopg2-binary
 
 SQLAlchemy==2.0.52
+
 pydantic==2.13.5
+
 python-dotenv==1.2.3
 
 langchain-community==0.4.2
+
 langchain-core==1.6.2
+
 langchain-google-genai==4.4.0
-langchain-huggingface==1.2.2
+
 langgraph==1.2.11
 
-sentence-transformers
 faiss-cpu
+
+alembic
