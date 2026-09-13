@@ -2,7 +2,11 @@
 
 This project is a FastAPI-based GitHub webhook service that reviews pull requests with Gemini and posts review feedback back to GitHub.
 
+Live deployment: https://ai-code-review-agent-ah2k.onrender.com
+
 It is designed to receive GitHub webhook payloads, fetch the changed files for a PR, run a code review flow, and then publish findings as inline comments or PR-level comments while keeping the webhook response fast.
+
+To use the live URL, configure your GitHub repository webhook to send pull request events to `https://ai-code-review-agent-ah2k.onrender.com/webhook/github`, then open or update a pull request to trigger the review flow and receive comments from the app.
 
 ## What it does
 
